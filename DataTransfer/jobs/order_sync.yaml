@@ -1,0 +1,64 @@
+# Example: one source table ->> two target tables ("split") plus a rename.
+#
+# Template tokens:
+#   ${state.<key>}   high-water mark persisted in state/<name>.json
+#   ${env.<NAME>}    environment variable
+#   ${sys.now('FMT') ±N<S|M|H|D>}  current local time, optional offset
+#
+# Splitting / arbitrary per-row routing requires a custom ETL plugin
+# (LibETL SDK). This job shows the built-in pipeline only; uncomment the
+# plugin step once your plugin is built and listed under config.yaml `etl:`.
+
+name: order_sync
+
+description: 订单表增量同步（示例）
+
+enabled: true
+
+source:
+  connection: mysql_prod
+  table: t_order
+  # Incremental pull: orders newer than the stored high water mark over
+  # created_time, plus a rolling 30s window to catch late-arriving rows.
+  where: |
+    created_time > ${state.max_created} or
+    created_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}
+  primary_key:
+    - order_id
+  columns: order_id,user_id,amount,created_time
+
+target:
+  connection: pg_test
+  table: order
+  columns: order_id,user_id,amount,created_time
+  primary_key:
+    - order_id
+
+sync:
+  mode: upsert
+  state:
+    max_created:
+      type: max
+      column: created_time
+
+etl:
+  # built-in steps run in this order for every row
+  - cast:
+      column:
+        - name: amount
+          type: decimal
+  - filter:
+      keep: amount gte 0
+  # custom plugin step: split each order into a header (default target table)
+  # plus its detail rows (read through the host lookup, written to detail_table).
+  - plugin: order_split
+    config:
+      detail_table: order_item
+      source_detail_table: t_order_item
+      detail_columns: [item_id, product, qty, price]
+      parent_key: order_id
+      child_key: order_id
+      keep: [order_id, user_id, amount]
+
+schedule:
+  cron: "0/3 * * * * *"

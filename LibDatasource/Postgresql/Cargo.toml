@@ -1,0 +1,18 @@
+[package]
+name = "PostgresqlPlugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "PostgreSQL datasource plugin for DataTransfer (cdylib)"
+
+[lib]
+name = "postgresql"
+crate-type = ["cdylib"]
+
+[dependencies]
+LibDatasource = { path = "..", default-features = false }
+postgres = { workspace = true, features = ["with-chrono-0_4"] }
+r2d2.workspace = true
+r2d2_postgres.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+log.workspace = true

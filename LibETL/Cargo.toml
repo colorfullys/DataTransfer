@@ -1,0 +1,21 @@
+[package]
+name = "LibETL"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "ETL SDK: transformation pipeline, built-in processors and C ABI for ETL plugins"
+
+[lib]
+name = "libetl"
+
+[dependencies]
+LibDatasource = { path = "../LibDatasource", default-features = false }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+libloading = { workspace = true, optional = true }
+
+[features]
+default = ["plugin-host"]
+plugin-host = ["dep:libloading"]

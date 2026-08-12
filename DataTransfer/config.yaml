@@ -1,0 +1,35 @@
+# DataTransfer main configuration.
+# Paths are relative to this file's directory.
+
+# Datasource plugins: <type> -> cdylib path (built by build.sh into plugins/).
+datasource:
+    mysql: plugins/datasource/mysql.so
+    postgresql: plugins/datasource/postgresql.so
+    oracle: plugins/datasource/oracle.so
+
+# ETL plugin cdylibs (optional).
+etl:
+    - plugins/etl/order_split.so
+
+# Dialect of datasource.yaml at this location:
+datasource_file: datasource.yaml
+
+# Jobs to run (paths relative to this file's directory).
+jobs:
+    - jobs/user_sync.yaml
+    #- jobs/order_sync.yaml
+
+# Directory where per-job high-water-mark files are kept.
+state_dir: state
+
+logging:
+    level: info
+    file: logs/sync.log
+
+runtime:
+    # Max number of jobs that may run at the same time.
+    workers: 8
+    # Extra write attempts per batch (beyond the first).
+    retry: 3
+    # Page size used by the source reader.
+    page_size: 500

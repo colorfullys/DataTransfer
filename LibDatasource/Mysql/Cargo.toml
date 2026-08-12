@@ -1,0 +1,15 @@
+[package]
+name = "MysqlPlugin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "MySQL datasource plugin for DataTransfer (cdylib)"
+
+[lib]
+name = "mysql"
+crate-type = ["cdylib"]
+
+[dependencies]
+LibDatasource = { path = "..", default-features = false }
+mysql.workspace = true
+log.workspace = true

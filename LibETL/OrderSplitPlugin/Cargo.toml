@@ -1,0 +1,16 @@
+[package]
+name = "OrderSplitPlugin"
+version = "0.1.0"
+edition = "2024"
+description = "LibETL plugin: split one order/header row into a header plus its detail rows"
+
+[dependencies]
+LibETL = { path = ".." }
+LibDatasource = { path = "../../LibDatasource", default-features = false }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+
+[lib]
+name = "order_split"
+crate-type = ["cdylib"]

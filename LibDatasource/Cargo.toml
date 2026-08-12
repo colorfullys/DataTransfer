@@ -1,0 +1,21 @@
+[package]
+name = "LibDatasource"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Datasource SDK: standard trait, data model and C ABI for database plugins"
+
+[lib]
+name = "libdatasource"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+libloading = { workspace = true, optional = true }
+
+[features]
+default = ["plugin-host"]
+# plugin-host: enables libloading based loader used by the DataTransfer process.
+plugin-host = ["dep:libloading"]

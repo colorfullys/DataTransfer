@@ -1,0 +1,17 @@
+[package]
+name = "DataTransfer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "DataTransfer orchestrator: loads datasource/ETL plugins and runs scheduled sync jobs"
+
+[dependencies]
+LibDatasource = { path = "../LibDatasource" }
+LibETL = { path = "../LibETL" }
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+env_logger.workspace = true
+cron.workspace = true
+yaml-rust2.workspace = true
+chrono = "0.4"
