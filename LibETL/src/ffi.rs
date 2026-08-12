@@ -2,12 +2,12 @@
 //! boundary as NUL-terminated JSON strings; out strings are owned by the
 //! plugin and released via `free_string`.
 
-use std::ffi::{c_char, c_uint, c_void, CStr, CString};
+use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
 
 use crate::error::EtlError;
 
 pub const C_OK: i32 = 0;
-pub const ABI_VERSION: c_uint = 1;
+pub const ABI_VERSION: c_uint = 2;
 
 pub type CProcPtr = *mut c_void;
 pub type CStrPtr = *const c_char;
@@ -27,6 +27,12 @@ pub type CLookupFn = unsafe extern "C" fn(
     out: CStrOut,
 ) -> i32;
 
+/// Host-provided log callback (`log::Level` as `c_int`, NUL-terminated message).
+/// Lets a plugin emit diagnostics through the host logger (plugin-side
+/// `log::info!`/`warn!`/... normally cannot reach it because each cdylib
+/// statically links its own `log` crate).
+pub type CLogFn = unsafe extern "C" fn(log_ctx: *mut c_void, level: c_int, msg: CStrPtr);
+
 /// Function pointer table an ETL plugin provides.
 #[repr(C)]
 pub struct EtlCapi {
@@ -38,10 +44,12 @@ pub struct EtlCapi {
     /// Destroy an instance.
     pub destroy: unsafe extern "C" fn(CProcPtr),
     /// Configure. `config` is the JSON blob from the job's `etl` block.
-    pub configure: unsafe extern "C" fn(CProcPtr, CStrPtr, CStrOut) -> i32,
+    /// `log_fn`/`log_ctx` expose the host logger so the plugin can emit logs.
+    pub configure: unsafe extern "C" fn(CProcPtr, CStrPtr, CLogFn, *mut c_void, CStrOut) -> i32,
     /// Transform one row. `input` is JSON `EtlInput`, `out` receives JSON `Vec<EtlOutputRow>`.
-    /// `lookup_fn`/`lookup_ctx` expose the host `TableLookup` for cross-table reads.
-    pub process: unsafe extern "C" fn(CProcPtr, CLookupFn, *mut c_void, CStrPtr, CStrOut) -> i32,
+    /// `lookup_fn`/`lookup_ctx` expose the host `TableLookup` for cross-table reads,
+    /// `log_fn`/`log_ctx` expose the host logger.
+    pub process: unsafe extern "C" fn(CProcPtr, CLookupFn, *mut c_void, CLogFn, *mut c_void, CStrPtr, CStrOut) -> i32,
     /// Free a string produced by this plugin.
     pub free_string: unsafe extern "C" fn(CStrPtr),
 }

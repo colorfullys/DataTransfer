@@ -133,7 +133,7 @@ impl JobRunner {
             "job '{job_name}' finished: read {read_rows} rows, wrote {written} rows in {elapsed:?} \
              | mode={} src={}@{} -> dst={}@{} writers={writers} pages={pages}{etl_note} writes=[{per_table}]",
             self.job.mode.as_str(),
-            self.job.source.table,
+            source_display(&self.job),
             self.job.source.connection,
             self.job.target.table,
             self.job.target.connection,
@@ -384,6 +384,15 @@ fn format_table_stats(stats: &TableStats) -> String {
         .map(|(t, n)| format!("{t}: {n}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Summary label for the source side (jobs without a `table` use `select`).
+fn source_display(job: &JobConfig) -> &str {
+    if job.source.table.is_empty() {
+        "<custom-select>"
+    } else {
+        &job.source.table
+    }
 }
 
 fn pk_for(table: &str, default_table: &str, default_pk: &[String]) -> Vec<String> {

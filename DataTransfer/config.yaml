@@ -23,7 +23,7 @@ jobs:
 state_dir: state
 
 logging:
-    level: info
+    level: debug
     file: logs/sync.log
 
 runtime:

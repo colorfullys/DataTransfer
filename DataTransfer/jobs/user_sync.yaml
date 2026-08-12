@@ -10,9 +10,10 @@ source:
   # 每次查询限制
   batch_limit: 20000
   #select 语句
-  select: SELECT * FROM sys_user |
-      where  user_id > ${state.max_user_id}
-      or create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}
+  select: |
+    SELECT * FROM sys_user
+    where  user_id > ${state.max_user_id}
+    or create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}
   #where: |
   #   user_id > ${state.max_user_id}
   #   or create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}

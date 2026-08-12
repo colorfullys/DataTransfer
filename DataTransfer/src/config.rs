@@ -293,6 +293,7 @@ pub struct JobConfig {
 #[derive(Debug, Clone)]
 pub struct SourceConfig {
     pub connection: String,
+    /// Source table. Optional when a custom `select` statement is provided.
     pub table: String,
     pub columns: Vec<String>,
     pub where_clause: Option<String>,
@@ -340,12 +341,16 @@ impl JobConfig {
         let src_conn = src["connection"]
             .as_str()
             .ok_or_else(|| AppError::Config(format!("job '{name}': source.connection")))?;
-        let src_table = src["table"]
-            .as_str()
-            .ok_or_else(|| AppError::Config(format!("job '{name}': source.table")))?;
+        let src_table = src["table"].as_str().unwrap_or("").to_string();
+        let has_select = src["select"].as_str().map(|s| !s.trim().is_empty()).unwrap_or(false);
+        if src_table.is_empty() && !has_select {
+            return Err(AppError::Config(format!(
+                "job '{name}': source needs a 'table' or a non-empty 'select'"
+            )));
+        }
         let source = SourceConfig {
             connection: src_conn.to_string(),
-            table: src_table.to_string(),
+            table: src_table,
             columns: split_csv(src["columns"].as_str()),
             where_clause: src["where"].as_str().map(|s| s.to_string()),
             primary_key: split_csv(src["primary_key"].as_str()),

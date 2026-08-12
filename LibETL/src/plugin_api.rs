@@ -8,12 +8,53 @@
 #![allow(clippy::missing_safety_doc)]
 
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::sync::OnceLock;
 
 use crate::error::{EtlError, Result};
-use crate::ffi::{to_string, CLookupFn, C_OK, CProcPtr, CStrOut, CStrPtr};
+use crate::ffi::{to_string, CLogFn, CLookupFn, C_OK, CProcPtr, CStrOut, CStrPtr};
 use crate::model::EtlInput;
 use crate::trait_def::{EtlConfigure, EtlContext, EtlProcessor, TableLookup};
 use libdatasource::model::Row;
+
+/// Forwards plugin-side `log::*!` records to the host logger (provided over
+/// the C ABI), because a dynamically loaded cdylib statically links its own
+/// copy of the `log` crate whose registry the host never touches.
+struct PluginLogger {
+    log_fn: CLogFn,
+    ctx: *mut c_void,
+}
+
+impl PluginLogger {
+    fn install(log_fn: CLogFn, ctx: *mut c_void) {
+        static PLACEHOLDER: OnceLock<()> = OnceLock::new();
+        PLACEHOLDER.get_or_init(|| {
+            log::set_boxed_logger(Box::new(PluginLogger { log_fn, ctx }))
+                .map(|()| log::set_max_level(log::LevelFilter::Trace))
+                .ok();
+        });
+    }
+}
+
+unsafe impl Sync for PluginLogger {}
+unsafe impl Send for PluginLogger {}
+
+impl log::Log for PluginLogger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        let msg = match CString::new(record.args().to_string()) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        unsafe {
+            (self.log_fn)(self.ctx, record.level() as i32, msg.as_ptr());
+        }
+    }
+
+    fn flush(&self) {}
+}
 
 pub unsafe extern "C" fn etl_create<T: Default>() -> CProcPtr {
     Box::into_raw(Box::<T>::default()) as CProcPtr
@@ -28,8 +69,13 @@ pub unsafe extern "C" fn etl_destroy<T>(ptr: CProcPtr) {
 pub unsafe extern "C" fn etl_configure<T: EtlConfigure>(
     ptr: CProcPtr,
     config: CStrPtr,
+    log_fn: CLogFn,
+    log_ctx: *mut c_void,
     out: CStrOut,
 ) -> i32 {
+    if (log_fn as usize) != 0 {
+        PluginLogger::install(log_fn, log_ctx);
+    }
     let s = match unsafe { to_string(config) } {
         Ok(s) => s,
         Err(e) => {
@@ -52,9 +98,14 @@ pub unsafe extern "C" fn etl_process<T: EtlProcessor>(
     ptr: CProcPtr,
     lookup_fn: CLookupFn,
     lookup_ctx: *mut c_void,
+    log_fn: CLogFn,
+    log_ctx: *mut c_void,
     input: CStrPtr,
     out: CStrOut,
 ) -> i32 {
+    if (log_fn as usize) != 0 {
+        PluginLogger::install(log_fn, log_ctx);
+    }
     let s = match unsafe { to_string(input) } {
         Ok(s) => s,
         Err(e) => {

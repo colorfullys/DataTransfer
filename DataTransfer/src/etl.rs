@@ -7,7 +7,7 @@
 //!   dynamic ETL plugins (they forward lookup requests back over this ABI).
 //! * [`EtlPipeline`] runs a job's ordered list of built-in + plugin steps.
 
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::sync::Arc;
 
 use libdatasource::model::{Row, Value};
@@ -100,9 +100,24 @@ impl TableLookup for AppLookup {
     }
 }
 
+/// C entry point that lets ETL plugins emit logs through the host logger.
+/// `level` follows `log::Level` (Error=1 .. Trace=5).
+pub unsafe extern "C" fn etl_log_cb(_log_ctx: *mut c_void, level: c_int, msg: *const c_char) {
+    if msg.is_null() {
+        return;
+    }
+    let s = unsafe { CStr::from_ptr(msg) }.to_string_lossy();
+    match level {
+        1 => log::error!("{s}"),
+        2 => log::warn!("{s}"),
+        3 => log::info!("{s}"),
+        4 => log::debug!("{s}"),
+        _ => log::trace!("{s}"),
+    }
+}
+
 /// C entry point handed to dynamic ETL plugins. `ctx` is a `*const AppLookup`.
-pub unsafe extern "C" fn etl_lookup_cb(
-    ctx: *mut c_void,
+pub unsafe extern "C" fn etl_lookup_cb(    ctx: *mut c_void,
     conn: *const c_char,
     table: *const c_char,
     columns: *const c_char,
@@ -219,7 +234,7 @@ impl EtlPipeline {
                         .map_err(|e| AppError::Config(format!("job '{}': {e}", job.name)))?;
                     let ctx_ptr = Arc::as_ptr(lookup) as *mut c_void;
                     let proc = handle
-                        .instantiate(config, etl_lookup_cb, ctx_ptr)
+                        .instantiate(config, etl_lookup_cb, ctx_ptr, etl_log_cb, ctx_ptr)
                         .map_err(|e| AppError::Etl(format!("job '{}': {e}", job.name)))?;
                     steps.push(proc);
                 }

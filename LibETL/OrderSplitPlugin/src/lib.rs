@@ -138,6 +138,18 @@ impl EtlConfigure for OrderSplit {
                 "order_split: config.parent_key is required".into(),
             ));
         }
+        log::info!(
+            "order_split: configured (detail_table={}, source_detail_table={}, parent_key={}, child_key={}, keep={})",
+            cfg.detail_table,
+            cfg.source_detail_table.as_deref().unwrap_or(&cfg.detail_table),
+            cfg.parent_key,
+            cfg.child_key.as_deref().unwrap_or(&cfg.parent_key),
+            if cfg.keep.is_empty() {
+                "all".to_string()
+            } else {
+                cfg.keep.join(",")
+            }
+        );
         let _ = self.config.set(cfg);
         Ok(())
     }

@@ -190,7 +190,7 @@ schedule:
 
 #### source.select 与 batch_limit 分页
 
-**`source.select`**：自定义完整 SELECT 语句，用于多表 JOIN 等场景，直接替代自动生成的 `SELECT <columns> FROM <table>`。内部仍会展开模板（`${state.*}`、`${sys.now(...)}`），所以增量过滤要写进 select 本身；此时 `where` 会被忽略（日志会提示）。
+**`source.select`**：自定义完整 SELECT 语句，用于多表 JOIN 等场景，直接替代自动生成的 `SELECT <columns> FROM <table>`。内部仍会展开模板（`${state.*}`、`${sys.now(...)}`），所以增量过滤要写进 select 本身；此时 `where` 会被忽略（日志会提示）。省略 `table` 时，首次运行的 `${state.*}` 低界会从 select 采样推断：包一层 `SELECT * FROM (<select>) LIMIT 1` 读取一行，按值类型推断列类型（select 返回 0 行时退化为 `0` 并告警）。
 
 **`source.batch_limit`**：每次查询拉取的行数上限（默认取全局 `runtime.page_size`）。读取按此值分页，每页拉满后立即经 ETL 分发给 writer，不会一次把全部数据读进内存。
 
@@ -249,7 +249,9 @@ export_datasource_plugin!(MyDatasource, "mydb");  // 宏生成 ds_get_api
 
 ### ETL 插件（LibETL）
 
-插件导出 `etl_get_api`，返回静态 `EtlCapi`。`process` 接收 `CLookupFn` + 不透明指针，宿主注入 `TableLookup` 实现，插件可用 `CbLookup` 转发跨表查询——双方分离编译、不共享对象类型。
+插件导出 `etl_get_api`，返回静态 `EtlCapi`（ABI version = 2）。`process` 接收 `CLookupFn` + 不透明指针，宿主注入 `TableLookup` 实现，插件可用 `CbLookup` 转发跨表查询——双方分离编译、不共享对象类型。
+
+插件可以在代码里直接用 `log::info!` / `log::warn!` / `log::debug!`：宿主在 `process`/`configure` 时注入日志回调，插件的 `log` 输出会桥接到宿主 logger（跟随 `logging.level`，写入 `logs/sync.log`）。注意插件自身的 `log` 断言只能在回调注入后生效，且每插件进程只注册一次。
 
 ```rust
 use libetl::{export_etl_plugin, EtlConfigure, EtlContext, EtlProcessor};

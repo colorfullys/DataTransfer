@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use libdatasource::datasource::Datasource;
-use libdatasource::model::{TableSchema, Value};
+use libdatasource::model::{Column, TableSchema, Value};
 
 use crate::config::{SourceConfig, StateSpec};
 use crate::error::{AppError, AppResult};
@@ -37,19 +37,40 @@ impl Reader {
         state: &StateStore,
         page_size: u64,
     ) -> AppResult<Reader> {
-        let schema = ds.get_schema(&source.table).ok();
+        let schema = if !source.table.is_empty() {
+            ds.get_schema(&source.table).ok()
+        } else if let Some(sel) = &source.select {
+            match probe_select_schema(ds.as_ref(), conn_type, sel, &|key| {
+                resolve_state_default(state, specs, &None, key)
+            }) {
+                Ok(Some(s)) => {
+                    log::debug!(
+                        "job reader '<custom-select>': inferred schema from select probe ({} column(s))",
+                        s.columns.len()
+                    );
+                    Some(s)
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    log::warn!("job reader '<custom-select>': could not probe schema from select: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let expander = Template {
             resolve_state: &|key| resolve_state_default(state, specs, &schema, key),
             now: &chrono::Local::now,
         };
         let sql = build_select(&source, &expander, conn_type)?;
         let batch_size = source.batch_limit.unwrap_or(page_size).max(1);
-        log::debug!("reader '{}' SQL: {sql}", source.table);
-        log::info!("job reader '{}' SQL: {sql}", source.table);
+        log::debug!("reader '{}' SQL: {sql}", source_label(&source));
+        log::info!("job reader '{}' SQL: {sql}", source_label(&source));
         if source.batch_limit.is_some() {
             log::info!(
                 "job reader '{}' batch limit: {} row(s) per query",
-                source.table,
+                source_label(&source),
                 batch_size
             );
         }
@@ -79,7 +100,9 @@ impl Reader {
             .map_err(|e| {
                 AppError::Datasource(format!(
                     "read {} (offset {}): {e}\nsql: {}",
-                    self.source.table, self.offset, self.sql
+                    source_label(&self.source),
+                    self.offset,
+                    self.sql
                 ))
             })?;
         self.offset += self.page_size;
@@ -88,6 +111,77 @@ impl Reader {
             return Ok(None);
         }
         Ok(Some(rows))
+    }
+}
+
+/// A stable label for log/error output when no `table` is configured.
+fn source_label(source: &SourceConfig) -> &str {
+    if source.table.is_empty() {
+        "<custom-select>"
+    } else {
+        &source.table
+    }
+}
+
+/// Infer the result schema of a custom `select` without a `table` to read via
+/// `get_schema`. Runs `SELECT * FROM (<expanded select>) LIMIT 1` and derives
+/// each column's type from the returned sample value.
+///
+/// Returns `Ok(None)` when the select returns no rows (nothing to infer from).
+fn probe_select_schema(
+    ds: &dyn Datasource,
+    conn_type: &str,
+    select: &str,
+    resolve_state: &dyn Fn(&str) -> AppResult<Option<String>>,
+) -> AppResult<Option<TableSchema>> {
+    let expanded = Template {
+        resolve_state,
+        now: &chrono::Local::now,
+    }
+    .expand(select)?;
+    let s = expanded.trim().trim_end_matches([';', ' ']);
+    if s.is_empty() {
+        return Ok(None);
+    }
+    let sql = if conn_type.starts_with("oracle") {
+        format!("SELECT * FROM ({s}) WHERE ROWNUM <= 1")
+    } else {
+        format!("SELECT * FROM ({s}) dt_probe LIMIT 1")
+    };
+    let mut rows = ds
+        .query(&sql)
+        .map_err(|e| AppError::Datasource(format!("probe select schema: {e}\nsql: {sql}")))?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    let sample = rows.remove(0);
+    let columns: Vec<Column> = sample
+        .data
+        .iter()
+        .map(|(name, v)| Column {
+            name: name.clone(),
+            data_type: infer_type(v).to_string(),
+            nullable: true,
+            is_primary: false,
+            ordinal: 0,
+        })
+        .collect();
+    Ok(Some(TableSchema {
+        table: "<custom-select>".to_string(),
+        columns,
+    }))
+}
+
+/// Coarse column type approximation from a sampled value — only used to pick a
+/// safe first-run lower bound for `${state.*}` templates.
+fn infer_type(v: &Value) -> &'static str {
+    match v {
+        Value::Null | Value::String(_) | Value::Bytes(_) => "varchar",
+        Value::Bool(_) => "bool",
+        Value::Int(_) | Value::UInt(_) => "bigint",
+        Value::Float(_) => "double",
+        Value::Decimal(_) => "decimal",
+        Value::Date(_) => "datetime",
     }
 }
 
@@ -116,6 +210,12 @@ fn build_select(source: &SourceConfig, t: &Template, conn_type: &str) -> AppResu
             );
         }
         return t.expand(s);
+    }
+
+    if source.table.is_empty() {
+        return Err(AppError::Config(
+            "source has no 'table' and no 'select' to build a query from".into(),
+        ));
     }
 
     let quote = |n: &str| -> String {

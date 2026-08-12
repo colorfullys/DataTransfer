@@ -7,7 +7,7 @@ use std::sync::Arc;
 use libloading::Library;
 
 use crate::error::{EtlError, Result};
-use crate::ffi::{CLookupFn, EtlCapi, C_OK};
+use crate::ffi::{CLogFn, CLookupFn, EtlCapi, C_OK};
 use crate::model::{EtlInput, EtlOutputRow};
 use crate::plugin_api::CbLookup;
 use crate::trait_def::{EtlContext, EtlProcessor};
@@ -82,11 +82,14 @@ impl EtlHandle {
         &self.name
     }
 
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn instantiate(
         &self,
         config: &serde_json::Value,
         lookup_fn: CLookupFn,
         lookup_ctx: *mut c_void,
+        log_fn: CLogFn,
+        log_ctx: *mut c_void,
     ) -> Result<Arc<dyn EtlProcessor>> {
         let capi = self.capi;
         let proc = unsafe { (capi.create)() };
@@ -98,7 +101,7 @@ impl EtlHandle {
             let cfg_json = config.to_string();
             let cfg_c = CString::new(cfg_json).map_err(|e| EtlError::Config(e.to_string()))?;
             let mut err: *const c_char = std::ptr::null();
-            let rc = unsafe { (capi.configure)(proc, cfg_c.as_ptr(), &mut err) };
+            let rc = unsafe { (capi.configure)(proc, cfg_c.as_ptr(), log_fn, log_ctx, &mut err) };
             if rc != C_OK {
                 let msg = read_err(err);
                 unsafe { (capi.destroy)(proc) };
@@ -119,6 +122,8 @@ impl EtlHandle {
                 f: lookup_fn,
                 ctx: lookup_ctx,
             },
+            log_fn,
+            log_ctx,
         }))
     }
 }
@@ -129,6 +134,8 @@ struct LoadedProcessor {
     capi: &'static EtlCapi,
     proc: *mut std::ffi::c_void,
     lookup: CbLookup,
+    log_fn: CLogFn,
+    log_ctx: *mut c_void,
 }
 
 unsafe impl Send for LoadedProcessor {}
@@ -152,7 +159,15 @@ impl EtlProcessor for LoadedProcessor {
 
         let mut out: *const c_char = std::ptr::null();
         let rc = unsafe {
-            (self.capi.process)(self.proc, self.lookup.f, self.lookup.ctx, json_c.as_ptr(), &mut out)
+            (self.capi.process)(
+                self.proc,
+                self.lookup.f,
+                self.lookup.ctx,
+                self.log_fn,
+                self.log_ctx,
+                json_c.as_ptr(),
+                &mut out,
+            )
         };
         if rc != C_OK {
             let msg = read_err(out);
