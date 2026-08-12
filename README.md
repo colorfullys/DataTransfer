@@ -185,13 +185,15 @@ sync:
   state:
     max_id: { type: max, column: id }
 
-etl:                              # 可选：按顺序执行的内置/插件步骤
+etl:                              # 可选：按顺序执行的内置/插件步骤（只作用于本任务）
   - cast:
       column: [{ name: amount, type: decimal }]
 
 schedule:
   cron: "0 */5 * * * *"
 ```
+
+> 注意两个 `etl:` 的区别：`config.yaml` 顶层 `etl:` 是**全局**的，只注册插件 `.so` 路径（启动时加载）；每个任务文件里的 `etl:` 是该**任务私有**的步骤流水线（可选），只作用于本任务。
 
 #### 列映射（source.columns / target.columns）
 
