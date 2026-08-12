@@ -1,24 +1,46 @@
+# 任务示例：自定义 select 增量同步（用户表）
+#
+# 本任务演示当前版本的关键能力：
+#   * source.select：自定义完整 SELECT（支持 JOIN、模板变量），可省略 source.table
+#   * source.batch_limit：每次查询拉取的行数上限（覆盖 runtime.page_size）
+#   * writers：ETL 之后按主键哈希分发到多个并发的 writer 并行写目标库
+#
+# 模板变量（在 where / select 里展开）：
+#   ${state.<key>}            持久化的高水位（state/<name>.json）；首跑无状态时按列类型取低界 -> 全量
+#   ${env.<NAME>}             环境变量
+#   ${sys.now('FMT') ±N<S|M|H|D>}  当前本地时间，可选偏移（秒/分/时/天）
+#
+# 列映射（source.columns / target.columns）：
+#   两端都写 -> 按位置一一对应（target.columns[i] 取 source.columns[i] 的值）；
+#   只写一端 -> 按列名匹配；两端都空 -> SELECT * 全列写入。
+#   用 select 时，source.columns 里的列名须与 select 结果集的列名一致（别名以别名为准）。
+#
+# 注意：select 是原样执行的，过滤条件要写进 select 本身（此任务省略了 table）。
+
 name: user_sync
-description: temp e2e verification job
+
+description: 用户表增量同步（自定义 select + 批量分页 + 多 writer）
+
 enabled: true
 
-# writer数量
+# 并行 writer 数（默认 1）；目标连接 max_pool_size 建议 >= writers
 writers: 3
 
 source:
   connection: mysql_db1
-  # 每次查询限制
+  # 每次查询拉取的行数上限（可选，默认取 runtime.page_size）
   batch_limit: 20000
-  #select 语句
+  # 自定义完整 SELECT（多行用块标量 |，首列缩进一致即识别为多行）
+  # 增量过滤必须写进 select 本身；写了 select 后 where 会被忽略（日志会提示）
   select: |
     SELECT * FROM sys_user
     where  user_id > ${state.max_user_id}
     or create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}
-  #where: |
-  #   user_id > ${state.max_user_id}
-  #   or create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}
+  # source.table 可省略（有非空 select 即可）；此处若保留 table 则用它做 schema 探测
+  # table: sys_user
   primary_key:
     - user_id
+  # 写端列映射用的源列名（与 target.columns 位置对应）
   columns: user_id,user_name,create_time,login_name
 
 target:
@@ -29,12 +51,20 @@ target:
   columns: user_id,user_name,create_time,login_name
 
 sync:
-  mode: upsert
+  mode: upsert                   # full | upsert | append
   state:
     max_user_id:
       type: max
       column: user_id
 
+etl:
+  # 可选：内置步骤按顺序执行（rename/set/filter/cast），或引用自定义插件
+  # - cast:
+  #     column:
+  #       - name: amount
+  #         type: decimal
+  # - plugin: my_step
+  #   config: {...}
+
 schedule:
   cron: "*/10 * * * * *"
-

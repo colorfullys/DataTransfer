@@ -1,25 +1,32 @@
-# Example: one source table ->> two target tables ("split") plus a rename.
+# 任务示例：订单一条源记录 -> 两个目标表（一对多拆分）
 #
-# Template tokens:
-#   ${state.<key>}   high-water mark persisted in state/<name>.json
-#   ${env.<NAME>}    environment variable
-#   ${sys.now('FMT') ±N<S|M|H|D>}  current local time, optional offset
+# 演示 ETL 能力：
+#   * 内置步骤按顺序执行：cast（类型转换）、filter（行过滤）
+#   * 自定义插件 order_split（LibETL/OrderSplitPlugin）：
+#       每行订单拆成 1 条 header（写默认目标表）+ N 条 detail（写 detail_table），
+#       detail 经宿主 lookup 回调跨表读取（列、where、参数、limit 全走参数化绑定）。
 #
-# Splitting / arbitrary per-row routing requires a custom ETL plugin
-# (LibETL SDK). This job shows the built-in pipeline only; uncomment the
-# plugin step once your plugin is built and listed under config.yaml `etl:`.
+# 此任务引用示例连接 mysql_prod / pg_test，默认在 config.yaml 里被注释；
+# 启用前请改成本环境真实连接，并建好 t_order / t_order_item 与目标表。
+#
+# 模板变量（在 where / select 里展开）：
+#   ${state.<key>}            持久化的高水位（state/<name>.json）；首跑无状态时按列类型取低界 -> 全量
+#   ${env.<NAME>}             环境变量
+#   ${sys.now('FMT') ±N<S|M|H|D>}  当前本地时间，可选偏移
 
 name: order_sync
 
-description: 订单表增量同步（示例）
+description: 订单表增量同步 + 一对多拆分（示例）
 
 enabled: true
+
+# 并行 writer 数（默认 1）；目标连接 max_pool_size 建议 >= writers
+writers: 2
 
 source:
   connection: mysql_prod
   table: t_order
-  # Incremental pull: orders newer than the stored high water mark over
-  # created_time, plus a rolling 30s window to catch late-arriving rows.
+  # 增量拉取：大于已存高水位，加上一个回滚 30s 窗口兜住迟到的行
   where: |
     created_time > ${state.max_created} or
     created_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}
@@ -42,15 +49,14 @@ sync:
       column: created_time
 
 etl:
-  # built-in steps run in this order for every row
+  # 内置步骤按顺序执行，作用于每一行
   - cast:
       column:
         - name: amount
           type: decimal
   - filter:
       keep: amount gte 0
-  # custom plugin step: split each order into a header (default target table)
-  # plus its detail rows (read through the host lookup, written to detail_table).
+  # 自定义插件：拆分成 header（写默认目标表 order）与 detail（写 detail_table）
   - plugin: order_split
     config:
       detail_table: order_item
@@ -61,4 +67,4 @@ etl:
       keep: [order_id, user_id, amount]
 
 schedule:
-  cron: "0/3 * * * * *"
+  cron: "*/10 * * * * *"
