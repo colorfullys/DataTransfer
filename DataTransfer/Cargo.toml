@@ -3,6 +3,8 @@ name = "DataTransfer"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+
 description = "DataTransfer orchestrator: loads datasource/ETL plugins and runs scheduled sync jobs"
 
 [dependencies]

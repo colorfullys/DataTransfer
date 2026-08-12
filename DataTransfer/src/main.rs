@@ -11,6 +11,7 @@ mod error;
 mod etl;
 mod logging;
 mod reader;
+mod router;
 mod runner;
 mod scheduler;
 mod state;
@@ -147,12 +148,8 @@ fn main() {
                 if let Err(e) = scheduler::run_on_schedule(&cron_expr, move || {
                     let _guard = gate.acquire();
                     log::info!("job '{inner_name}' starting");
-                    let started = std::time::Instant::now();
                     match runner.run_once() {
-                        Ok((written, read)) => log::info!(
-                            "job '{inner_name}' run took {:?} (read {read}, wrote {written})",
-                            started.elapsed()
-                        ),
+                        Ok(_) => {}
                         Err(e) => log::error!("job '{inner_name}' failed: {e}"),
                     }
                 }) {

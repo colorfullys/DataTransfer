@@ -3,6 +3,8 @@ name = "OraclePlugin"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+
 description = "Oracle datasource plugin for DataTransfer (cdylib)"
 
 [lib]

@@ -125,6 +125,14 @@ pub unsafe extern "C" fn etl_lookup_cb(
         let cols_s = cstr(columns).unwrap_or_else(|| "null".into());
         let where_s = cstr(where_clause);
         let params_s = cstr(params).unwrap_or_else(|| "[]".into());
+        log::debug!(
+            "etl lookup: {}::{}{} limit={} params={}",
+            conn_s,
+            table_s,
+            if where_s.is_some() { format!(" where {where}", where = where_s.as_deref().unwrap_or("")) } else { String::new() },
+            limit,
+            params_s,
+        );
 
         let cols: Option<Vec<String>> = if cols_s == "null" || cols_s == "NULL" {
             None
@@ -217,6 +225,12 @@ impl EtlPipeline {
                 }
             }
         }
+        let names: Vec<String> = steps.iter().map(|s| s.name().to_string()).collect();
+        if names.is_empty() {
+            log::info!("job '{}': etl pipeline: none (identity pass-through)", job.name);
+        } else {
+            log::info!("job '{}': etl pipeline: {}", job.name, names.join(" -> "));
+        }
         Ok(EtlPipeline { steps })
     }
 
@@ -228,6 +242,13 @@ impl EtlPipeline {
         lookup: &dyn TableLookup,
         default_table: &str,
     ) -> AppResult<Vec<EtlOutputRow>> {
+        log::debug!(
+            "etl: input row from {}::{} ({} col(s), {} step(s))",
+            input.source_connection,
+            input.source_table,
+            input.row.columns().len(),
+            self.steps.len()
+        );
         let mut current = vec![EtlOutputRow::new(default_table, input.row.clone())];
         for step in &self.steps {
             let mut next = Vec::new();
@@ -246,6 +267,12 @@ impl EtlPipeline {
                         .map_err(|e| AppError::Etl(format!("etl step '{}': {e}", step.name())))?,
                 );
             }
+            log::debug!(
+                "etl step '{}': {} row(s) -> {} output row(s)",
+                step.name(),
+                current.len(),
+                next.len()
+            );
             current = next;
         }
         Ok(current)

@@ -43,13 +43,22 @@ impl Reader {
             now: &chrono::Local::now,
         };
         let sql = build_select(&source, &expander, conn_type)?;
+        let batch_size = source.batch_limit.unwrap_or(page_size).max(1);
         log::debug!("reader '{}' SQL: {sql}", source.table);
+        log::info!("job reader '{}' SQL: {sql}", source.table);
+        if source.batch_limit.is_some() {
+            log::info!(
+                "job reader '{}' batch limit: {} row(s) per query",
+                source.table,
+                batch_size
+            );
+        }
         Ok(Reader {
             ds,
             sql,
             source,
             schema,
-            page_size,
+            page_size: batch_size,
             offset: 0,
             done: false,
         })
@@ -69,8 +78,8 @@ impl Reader {
             .query_page(&self.sql, self.offset, self.page_size)
             .map_err(|e| {
                 AppError::Datasource(format!(
-                    "read {} (offset {}): {e}",
-                    self.source.table, self.offset
+                    "read {} (offset {}): {e}\nsql: {}",
+                    self.source.table, self.offset, self.sql
                 ))
             })?;
         self.offset += self.page_size;
@@ -82,8 +91,33 @@ impl Reader {
     }
 }
 
-/// Build `SELECT <cols> FROM <table> [WHERE <expanded>]`.
+/// Build the reader's base query.
+///
+/// * If `source.select` is given it is used verbatim as the full SELECT (for
+///   joins etc.); `${state.*}` / `${sys.now(...)}` templates are expanded. Any
+///   `where` clause is ignored in this mode (put filtering inside the `select`).
+/// * Otherwise generate `SELECT <cols> FROM <table> [WHERE <expanded>]`.
+///
+/// Pagination is added by each datasource plugin's `query_page` in the lib
+/// (MySQL/PG `LIMIT/OFFSET`, Oracle `OFFSET ROWS FETCH NEXT`).
 fn build_select(source: &SourceConfig, t: &Template, conn_type: &str) -> AppResult<String> {
+    if let Some(s) = &source.select {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err(AppError::Config(format!(
+                "job source '{}': 'select' must not be empty",
+                source.table
+            )));
+        }
+        if source.where_clause.as_deref().is_some_and(|w| !w.trim().is_empty()) {
+            log::warn!(
+                "job source '{}': 'select' overrides 'where'; the custom select must contain its own filtering (use {{{{state.*}}}} templates)",
+                source.table
+            );
+        }
+        return t.expand(s);
+    }
+
     let quote = |n: &str| -> String {
         if conn_type == "mysql" {
             format!("`{}`", n.replace('`', "``"))

@@ -12,6 +12,18 @@ pub fn init(level: &str, file: Option<&str>) {
 
     match file {
         Some(path) => {
+            if !path.trim().is_empty() {
+                if let Some(parent) = std::path::Path::new(path).parent() {
+                    if !parent.as_os_str().is_empty() {
+                        if let Err(e) = std::fs::create_dir_all(parent) {
+                            eprintln!(
+                                "warning: cannot create log directory '{}': {e}",
+                                parent.display()
+                            );
+                        }
+                    }
+                }
+            }
             match std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)

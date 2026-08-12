@@ -103,7 +103,13 @@ impl<'a> Template<'a> {
                 AppError::Template(format!("sys.now offset overflow: '{offset}'"))
             })?
         };
-        Ok(dt.format(&chrono_fmt).to_string())
+        // Render as a quoted SQL literal (like state date/string values), so
+        // `create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}` produces
+        // `create_time > '2026-08-12 02:43:54'` instead of a syntax error.
+        Ok(format!(
+            "'{}'",
+            dt.format(&chrono_fmt).to_string().replace('\'', "''")
+        ))
     }
 }
 
@@ -228,10 +234,10 @@ mod tests {
             now: &(move || fixed),
         };
         let out = t.expand("${sys.now('%Y-%m-%d %H:%M:%S')}").unwrap();
-        assert_eq!(out, "2024-01-01 12:00:00");
+        assert_eq!(out, "'2024-01-01 12:00:00'");
         let out = t.expand("${sys.now('%Y-%m-%d') -1D}").unwrap();
-        assert_eq!(out, "2023-12-31");
+        assert_eq!(out, "'2023-12-31'");
         let out = t.expand("${sys.now('%H:%M:%S') -30S}").unwrap();
-        assert_eq!(out, "11:59:30");
+        assert_eq!(out, "'11:59:30'");
     }
 }

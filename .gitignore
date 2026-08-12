@@ -1,1 +1,20 @@
 /target
+
+# Build artifacts copied by build.sh into DataTransfer/plugins/
+DataTransfer/plugins/datasource/*.so
+DataTransfer/plugins/datasource/*.dylib
+DataTransfer/plugins/datasource/*.dll
+DataTransfer/plugins/etl/*.so
+DataTransfer/plugins/etl/*.dylib
+DataTransfer/plugins/etl/*.dll
+
+# Runtime outputs
+DataTransfer/logs/
+DataTransfer/state/
+
+# Local connection config with real credentials (keep it out of the repo)
+DataTransfer/datasource.yaml
+
+# Editors / OS
+*.swp
+.DS_Store

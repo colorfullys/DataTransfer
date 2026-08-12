@@ -1,42 +1,39 @@
-#${state.xxx}    同步状态
-#${env.xxx}      环境变量
-#${sys.xxx}      系统变量
-
-
 name: user_sync
-
-description: 用户同步任务
-
+description: temp e2e verification job
 enabled: true
+
+# writer数量
+writers: 3
 
 source:
   connection: mysql_db1
-  table: sys_user
-  # MAX_ID 是程序记录的， CURRENT_TIME('%Y-%m-%d %H:%M:%S') 当前时间格式化，-30S  减去30秒
-  where :  |
-       id > ${state.max_id}  or 
-       create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S} 
+  # 每次查询限制
+  batch_limit: 20000
+  #select 语句
+  select: SELECT * FROM sys_user |
+      where  user_id > ${state.max_user_id}
+      or create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}
+  #where: |
+  #   user_id > ${state.max_user_id}
+  #   or create_time > ${sys.now('%Y-%m-%d %H:%M:%S') -30S}
   primary_key:
-      - id
-  columns: id,name,age
+    - user_id
+  columns: user_id,user_name,create_time,login_name
 
 target:
-  connection: mysql_db2
-  table: users
-
-  primary_key: 
-       - id
-  columns: id,userName,age
+  connection: mysql_db1
+  table: sys_user_copy1
+  primary_key:
+    - user_id
+  columns: user_id,user_name,create_time,login_name
 
 sync:
-  # full: TRUNCATE TABLE sys_user;
-  # upsert: INSERT ...ON DUPLICATE KEY UPDATE ...
-  mode: upsert 
+  mode: upsert
   state:
-    max_id:
+    max_user_id:
       type: max
-      column: id
+      column: user_id
 
 schedule:
-  cron: "0/3 * * * * *"
+  cron: "*/10 * * * * *"
 

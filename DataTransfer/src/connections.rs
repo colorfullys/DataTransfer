@@ -74,11 +74,61 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Create and connect one datasource instance with a hard connect timeout.
+    ///
+    /// The call is moved to a worker thread and awaited for at most
+    /// `connect_timeout_secs`. Not every driver honours its own connect
+    /// timeout reliably (notably Oracle), so the host enforces it here. If the
+    /// timeout fires, the worker keeps waiting in the background but startup
+    /// fails immediately with a clear error.
     fn connect_one(&self, settings: &ConnectionSettings) -> AppResult<Arc<dyn Datasource>> {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
         let cfg = settings.to_connection_config();
-        self.plugins
-            .create_datasource(&cfg)
-            .map_err(|e| AppError::Datasource(format!("connect '{}': {e}", settings.name)))
+        let timeout = Duration::from_secs(cfg.connect_timeout_secs.max(1));
+        let handle = self
+            .plugins
+            .get(&cfg.conn_type)
+            .map_err(|e| AppError::Datasource(format!("connect '{}': {e}", settings.name)))?;
+
+        log::info!(
+            "connecting '{}' ({}@{}:{}, {}-s timeout)",
+            settings.name,
+            cfg.conn_type,
+            cfg.host,
+            cfg.port,
+            cfg.connect_timeout_secs
+        );
+
+        let handle = handle.clone();
+        let cfg_for_connect = cfg.clone();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(handle.create_datasource(&cfg_for_connect));
+        });
+
+        match rx.recv_timeout(timeout) {
+            Ok(Ok(ds)) => Ok(ds),
+            Ok(Err(e)) => Err(AppError::Datasource(format!(
+                "connect '{}': {e}",
+                settings.name
+            ))),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(AppError::Datasource(format!(
+                "connect '{}' ({}@{}:{}) timed out after {}s",
+                settings.name,
+                cfg.conn_type,
+                cfg.host,
+                cfg.port,
+                cfg.connect_timeout_secs
+            ))),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(AppError::Datasource(format!(
+                    "connect '{}': worker thread panicked",
+                    settings.name
+                )))
+            }
+        }
     }
 
     pub fn get(&self, name: &str) -> AppResult<Arc<dyn Datasource>> {
@@ -94,6 +144,12 @@ impl ConnectionManager {
             .get(name)
             .map(|s| s.conn_type.as_str())
             .ok_or_else(|| AppError::Config(format!("connection '{name}' is not connected")))
+    }
+
+    /// Connection pool size of a connection (drivers that pool their
+    /// connections use this as the max concurrent connections).
+    pub fn pool_size(&self, name: &str) -> Option<usize> {
+        self.settings.get(name).map(|s| s.max_pool_size as usize)
     }
 
     pub fn names(&self) -> Vec<String> {

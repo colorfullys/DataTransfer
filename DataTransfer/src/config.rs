@@ -92,7 +92,9 @@ impl AppConfig {
             .as_str()
             .unwrap_or("info")
             .to_string();
-        let log_file = cfg["logging"]["file"].as_str().map(|s| s.to_string());
+        let log_file = cfg["logging"]["file"]
+            .as_str()
+            .map(|s| resolve_relative(&base_dir, s));
 
         // ---- runtime ----
         let workers = cfg["runtime"]["workers"].as_i64().unwrap_or(4).max(1) as usize;
@@ -161,7 +163,7 @@ impl AppConfig {
                 database: v["database"].as_str().unwrap_or("").to_string(),
                 schema: v["schema"].as_str().map(|s| s.to_string()),
                 username: v["username"].as_str().unwrap_or("").to_string(),
-                password: v["password"].as_str().unwrap_or("").to_string(),
+                password: scalar_str(&v["password"]),
                 params,
                 max_pool_size: v["max_pool_size"].as_i64().unwrap_or(4).max(1) as u32,
                 connect_timeout_secs: v["connect_timeout_secs"].as_i64().unwrap_or(15).max(1) as u64,
@@ -209,6 +211,18 @@ impl ConnectionSettings {
             connect_timeout_secs: self.connect_timeout_secs,
         }
     }
+}
+
+/// Read a YAML scalar as a string, tolerating unquoted numbers/bools.
+/// `password: 123456` parses as an integer in YAML; this keeps the value
+/// instead of silently dropping it (`as_str()` returns `None` for numbers).
+fn scalar_str(y: &Yaml) -> String {
+    y.as_str()
+        .map(|s| s.to_string())
+        .or_else(|| y.as_i64().map(|i| i.to_string()))
+        .or_else(|| y.as_f64().map(|f| f.to_string()))
+        .or_else(|| y.as_bool().map(|b| b.to_string()))
+        .unwrap_or_default()
 }
 
 /// Expand `${VAR}` / `${env.VAR}` tokens from the environment, leaving unknown
@@ -267,6 +281,9 @@ pub struct JobConfig {
     /// state-key -> high water mark spec (only `max` supported today).
     pub state: BTreeMap<String, StateSpec>,
     pub cron: String,
+    /// Number of parallel writer threads this job uses (rows are routed to
+    /// them after the ETL pipeline). `1` is the default single-writer mode.
+    pub writers: usize,
     /// ETL pipeline steps. `None` means the identity transform.
     pub etl: Vec<EtlStep>,
     /// Raw config blob for dynamic plugin steps (delivered as JSON).
@@ -280,6 +297,13 @@ pub struct SourceConfig {
     pub columns: Vec<String>,
     pub where_clause: Option<String>,
     pub primary_key: Vec<String>,
+    /// Max rows fetched per query/paging pass (overrides `runtime.page_size`)
+    /// before rows are routed to the writers.
+    pub batch_limit: Option<u64>,
+    /// Custom full SELECT statement (join support). Replaces the generated
+    /// `SELECT <columns> FROM <table>`; `${state.*}` / `${sys.now(...)}`
+    /// templates are still expanded inside it.
+    pub select: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -325,6 +349,8 @@ impl JobConfig {
             columns: split_csv(src["columns"].as_str()),
             where_clause: src["where"].as_str().map(|s| s.to_string()),
             primary_key: split_csv(src["primary_key"].as_str()),
+            batch_limit: src["batch_limit"].as_i64().filter(|v| *v > 0).map(|v| v as u64),
+            select: src["select"].as_str().map(|s| s.to_string()),
         };
 
         let tgt = &y["target"];
@@ -364,6 +390,8 @@ impl JobConfig {
             .as_str()
             .ok_or_else(|| AppError::Config(format!("job '{name}': schedule.cron")))?;
 
+        let writers = y["writers"].as_i64().unwrap_or(1).max(1) as usize;
+
         // ---- etl steps ----
         let mut etl = Vec::new();
         let mut etl_configs = Vec::new();
@@ -389,6 +417,7 @@ impl JobConfig {
             mode,
             state,
             cron: cron.to_string(),
+            writers,
             etl,
             etl_configs,
         })

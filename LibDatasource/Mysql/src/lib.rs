@@ -270,24 +270,23 @@ fn trim_sql(sql: &str) -> &str {
 }
 
 fn row_from_mysql(row: MysqlRow) -> Row {
-    let names: Vec<String> = row
-        .columns_ref()
-        .iter()
-        .map(|c| c.name_str().as_ref().to_string())
-        .collect();
-    let values = row.unwrap();
+    let cols = row.columns_ref().to_vec();
+    let names: Vec<String> = cols.iter().map(|c| c.name_str().as_ref().to_string()).collect();
     let mut out = Row::new();
-    for (name, val) in names.into_iter().zip(values) {
-        out.insert(name, value_from_mysql(val));
+    let values = row.unwrap();
+    for (col, (name, val)) in cols.iter().zip(names.into_iter().zip(values)) {
+        out.insert(name, value_from_mysql(val, col));
     }
     out
 }
 
-fn value_from_mysql(v: mysql::Value) -> Value {
+/// Convert a MySQL value into the portable `Value` model, using the column
+/// metadata so that text-protocol results (where *everything* arrives as
+/// bytes) recover proper types: integers, decimals, dates and strings.
+fn value_from_mysql(v: mysql::Value, col: &mysql::Column) -> Value {
     use mysql::Value as M;
     match v {
         M::NULL => Value::Null,
-        M::Bytes(b) => Value::Bytes(b),
         M::Int(i) => Value::Int(i),
         M::UInt(u) => Value::UInt(u),
         M::Float(f) => Value::Float(f as f64),
@@ -297,6 +296,52 @@ fn value_from_mysql(v: mysql::Value) -> Value {
             let total_hours = days * 24 + u32::from(h);
             Value::String(format!("{:02}:{:02}:{:02}", total_hours, mi, s))
         }
+        M::Bytes(b) => bytes_by_type(b, col),
+    }
+}
+
+fn bytes_by_type(b: Vec<u8>, col: &mysql::Column) -> Value {
+    use mysql::consts::ColumnType as CT;
+    let s = String::from_utf8_lossy(&b);
+    // Charset 63 is the MySQL `binary` charset; any other charset on a
+    // BLOB-typed column means it is actually TEXT (the server reports TEXT as
+    // BLOB), which we decode as a String.
+    let is_binary = col.character_set() == 63;
+    match col.column_type() {
+        CT::MYSQL_TYPE_TINY
+        | CT::MYSQL_TYPE_SHORT
+        | CT::MYSQL_TYPE_LONG
+        | CT::MYSQL_TYPE_LONGLONG
+        | CT::MYSQL_TYPE_INT24
+        | CT::MYSQL_TYPE_YEAR => match s.parse::<i64>() {
+            Ok(i) => Value::Int(i),
+            Err(_) => match s.parse::<u64>() {
+                Ok(u) => Value::UInt(u),
+                Err(_) => Value::String(s.into_owned()),
+            },
+        },
+        CT::MYSQL_TYPE_FLOAT | CT::MYSQL_TYPE_DOUBLE => match s.trim().parse::<f64>() {
+            Ok(f) => Value::Float(f),
+            Err(_) => Value::String(s.into_owned()),
+        },
+        CT::MYSQL_TYPE_DECIMAL | CT::MYSQL_TYPE_NEWDECIMAL => Value::Decimal(s.into_owned()),
+        CT::MYSQL_TYPE_DATE | CT::MYSQL_TYPE_DATETIME | CT::MYSQL_TYPE_TIMESTAMP => {
+            Value::Date(s.into_owned())
+        }
+        CT::MYSQL_TYPE_TIME => Value::String(s.into_owned()),
+        CT::MYSQL_TYPE_BLOB
+        | CT::MYSQL_TYPE_TINY_BLOB
+        | CT::MYSQL_TYPE_MEDIUM_BLOB
+        | CT::MYSQL_TYPE_LONG_BLOB => {
+            if is_binary {
+                Value::Bytes(b)
+            } else {
+                Value::String(s.into_owned())
+            }
+        }
+        // Everything else (VARCHAR, TEXT, JSON, ENUM, SET, BIT, ...) becomes a
+        // String so downstream SQL literals are quoted, not hex-encoded.
+        _ => Value::String(s.into_owned()),
     }
 }
 

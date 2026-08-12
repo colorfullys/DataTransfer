@@ -3,6 +3,8 @@ name = "LibDatasource"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+
 description = "Datasource SDK: standard trait, data model and C ABI for database plugins"
 
 [lib]

@@ -1,0 +1,34 @@
+# Datasource connections. Passwords and sensitive params may use ${ENV_VAR}.
+# Copy this file to `datasource.yaml` and fill in your real values.
+# The real `datasource.yaml` is gitignored (it may contain credentials).
+connections:
+  mysql_prod:
+    type: mysql
+    host: 127.0.0.1
+    port: 3306
+    database: erp
+    username: sync
+    password: ${MYSQL_PASSWORD}
+    max_pool_size: 8
+    params:
+      charset: utf8mb4
+    # ssl_mode: require
+
+  pg_test:
+    type: postgresql
+    host: 192.168.1.20
+    port: 5432
+    database: test
+    username: postgres
+    password: ${PG_PASSWORD}
+    params:
+      ssl_mode: disable
+
+  # oracle_prod:
+  #   type: oracle
+  #   host: 192.168.1.30
+  #   port: 1521
+  #   database: ORACLE_SID   # service name / SID
+  #   schema: ERP
+  #   username: sync
+  #   password: ${ORACLE_PASSWORD}

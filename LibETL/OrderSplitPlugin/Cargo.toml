@@ -2,6 +2,8 @@
 name = "OrderSplitPlugin"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+
 description = "LibETL plugin: split one order/header row into a header plus its detail rows"
 
 [dependencies]

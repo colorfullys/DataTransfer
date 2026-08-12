@@ -126,11 +126,23 @@ pub unsafe extern "C" fn ds_connect<T: Datasource + 'static>(
             return 1;
         }
     };
-    let f = || -> Result<()> {
-        let mut guard = guard::<T>(ptr)?;
-        guard.connect(&cfg)
+    // NOTE: connect needs `&mut self`, so it locks the instance mutex directly
+    // instead of going through `ds_call` (which would deadlock on the lock it
+    // already holds).
+    let mut g = match guard::<T>(ptr) {
+        Ok(g) => g,
+        Err(e) => {
+            unsafe { ffi::set_out_err(out_err, &e) };
+            return 1;
+        }
     };
-    unsafe { ds_call_void::<T, _>(ptr, out_err, |_| f()) }
+    match g.connect(&cfg) {
+        Ok(()) => 0,
+        Err(e) => {
+            unsafe { ffi::set_out_err(out_err, &e) };
+            1
+        }
+    }
 }
 
 pub unsafe extern "C" fn ds_get_schema<T: Datasource + 'static>(
@@ -283,12 +295,29 @@ pub unsafe extern "C" fn ds_truncate<T: Datasource + 'static>(
     table: CStrPtr,
     out_err: CStrOut,
 ) -> i32 {
-    let f = || -> Result<()> {
-        let table = unsafe { ffi::c_to_string(table)? };
-        let guard = guard::<T>(ptr)?;
-        guard.truncate(&table)
+    let table = match unsafe { ffi::c_to_string(table) } {
+        Ok(s) => s,
+        Err(e) => {
+            unsafe { ffi::set_out_err(out_err, &e) };
+            return 1;
+        }
     };
-    unsafe { ds_call_void::<T, _>(ptr, out_err, |_| f()) }
+    // truncate needs `&mut self`; lock the instance mutex directly (ds_call
+    // would deadlock re-locking the guard it already holds).
+    let g = match guard::<T>(ptr) {
+        Ok(g) => g,
+        Err(e) => {
+            unsafe { ffi::set_out_err(out_err, &e) };
+            return 1;
+        }
+    };
+    match g.truncate(&table) {
+        Ok(()) => 0,
+        Err(e) => {
+            unsafe { ffi::set_out_err(out_err, &e) };
+            1
+        }
+    }
 }
 
 pub unsafe extern "C" fn ds_ping<T: Datasource + 'static>(
