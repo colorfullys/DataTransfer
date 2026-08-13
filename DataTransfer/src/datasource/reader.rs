@@ -12,8 +12,8 @@ use libdatasource::model::{Column, TableSchema, Value};
 
 use crate::config::{SourceConfig, StateSpec};
 use crate::error::{AppError, AppResult};
-use crate::state::StateStore;
-use crate::templates::{state_to_literal, Template};
+use crate::runtime::StateStore;
+use crate::support::templates::{state_to_literal, Template};
 
 pub struct Reader {
     ds: Arc<dyn Datasource>,

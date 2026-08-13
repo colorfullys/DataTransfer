@@ -16,7 +16,7 @@ use libetl::registry::EtlRegistry;
 use libetl::trait_def::{EtlContext, EtlProcessor, TableLookup};
 
 use crate::config::{EtlStepKind, JobConfig};
-use crate::connections::ConnectionManager;
+use crate::datasource::ConnectionManager;
 use crate::error::{AppError, AppResult};
 
 /// `TableLookup` used by every ETL processor in this process.

@@ -6,17 +6,11 @@
 //! builds a pipeline per enabled job and runs each on its cron schedule.
 
 mod config;
-mod connections;
+mod datasource;
 mod error;
 mod etl;
-mod logging;
-mod reader;
-mod router;
-mod runner;
-mod scheduler;
-mod state;
-mod templates;
-mod writer;
+mod runtime;
+mod support;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -25,10 +19,9 @@ use std::sync::Arc;
 use libetl::registry::EtlRegistry;
 
 use crate::config::JobConfig;
-use crate::connections::ConnectionManager;
+use crate::datasource::ConnectionManager;
 use crate::etl::{AppLookup, EtlPipeline};
-use crate::runner::JobRunner;
-use crate::scheduler::WorkerGate;
+use crate::runtime::{JobRunner, WorkerGate};
 
 fn fatal(e: error::AppError) -> ! {
     eprintln!("DataTransfer: {e}");
@@ -48,7 +41,7 @@ fn main() {
     if let Err(e) = app.load_datasources(&app.datasource_file.clone()) {
         fatal(e);
     }
-    logging::init(&app.log_level, app.log_file.as_deref());
+    support::init(&app.log_level, app.log_file.as_deref());
 
     // ---- datasource plugins & connections ----
     let mut conns = ConnectionManager::new();
@@ -145,7 +138,7 @@ fn main() {
             .spawn(move || {
                 log::info!("job '{job_name}' scheduled with cron '{cron_expr}'");
                 let inner_name = job_name.clone();
-                if let Err(e) = scheduler::run_on_schedule(&cron_expr, move || {
+                if let Err(e) = runtime::run_on_schedule(&cron_expr, move || {
                     let _guard = gate.acquire();
                     log::info!("job '{inner_name}' starting");
                     match runner.run_once() {

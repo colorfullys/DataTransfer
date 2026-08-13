@@ -12,13 +12,11 @@ use libdatasource::model::{Row, Value};
 use libetl::model::EtlRow;
 
 use crate::config::JobConfig;
-use crate::connections::ConnectionManager;
+use crate::datasource::reader::{value_gt, Reader};
+use crate::datasource::{ConnectionManager, Router, Writer};
 use crate::error::{AppError, AppResult};
 use crate::etl::{AppLookup, EtlPipeline};
-use crate::reader::{value_gt, Reader};
-use crate::router::Router;
-use crate::state::StateStore;
-use crate::writer::Writer;
+use crate::runtime::StateStore;
 
 const FLUSH_THRESHOLD: usize = 500;
 const WRITER_CHANNEL_CAPACITY: usize = 4096;
